@@ -1,0 +1,314 @@
+import os
+import pandas as pd
+from moog import sprite as sprite_lib
+from matplotlib import path as mpl_path
+from matplotlib import transforms as mpl_transforms
+import matplotlib.pyplot as plt
+import collections
+import json
+import numpy as np
+import seaborn as sns
+import colorsys
+
+_SPRITE_LOG_INDEX = 5
+_PREY_HUES = [0.1666, 0.3333, 0.6667, 0.1667, 0.5, 0.8333]
+_AGENT_HUE = [0.5]
+ATTRIBUTES_FULL = list(sprite_lib.Sprite.FACTOR_NAMES)
+
+ATTRIBUTES_PARTIAL = [
+    'x', 'y', 'x_vel', 'y_vel', 'angle', 'id']
+
+ATTRIBUTES_PARTIAL_INDICES = {k: i for i, k in enumerate(ATTRIBUTES_PARTIAL)}
+
+def _check_cols(cols, df):
+    for col in cols:
+        if col not in df.columns: 
+            raise KeyError('%s not in dataframe' % col)
+
+def create_new_sprite(sprite_kwargs, vertices=None):
+    """Create new sprite from factors.
+    Args:
+        sprite_kwargs: Dict. Keyword arguments for sprite_lib.Sprite.__init__().
+            All of the strings in sprite_lib.Sprite.FACTOR_NAMES must be keys of
+            sprite_kwargs.
+        vertices: Optional numpy array of vertices. If provided, are used to
+            define the shape of the sprite. Otherwise, sprite_kwargs['shape'] is
+            used.
+    Returns:
+        Instance of sprite_lib.Sprite.
+    """
+    if vertices is not None:
+        # Have vertices, so must invert the translation, rotation, and
+        # scaling transformations to get the original sprite shape.
+        center_translate = mpl_transforms.Affine2D().translate(
+            -sprite_kwargs['x'], -sprite_kwargs['y'])
+        x_y_scale = 1. / np.array([
+            sprite_kwargs['scale'],
+            sprite_kwargs['scale'] * sprite_kwargs['aspect_ratio']
+        ])
+        transform = (
+            center_translate +
+            mpl_transforms.Affine2D().rotate(-sprite_kwargs['angle']) +
+            mpl_transforms.Affine2D().scale(*x_y_scale)
+        )
+        vertices = mpl_path.Path(vertices)
+        vertices = transform.transform_path(vertices).vertices
+
+        sprite_kwargs['shape'] = vertices
+
+    return sprite_lib.Sprite(**sprite_kwargs)
+
+def get_trial_paths(base_path):
+    dataset_paths = [f.path for f in os.scandir(base_path)]
+    dataset_trial_paths = []
+    for dataset_path in dataset_paths:  
+        trial_paths = [
+            os.path.join(dataset_path, x)
+            for x in sorted(os.listdir(dataset_path)) if x.isnumeric()
+        ]
+        dataset_trial_paths += trial_paths
+    return dataset_trial_paths
+
+def attributes_to_sprite(a):
+    """Create sprite with given attributes."""
+    attributes = {x: a[i] for i, x in enumerate(ATTRIBUTES_FULL)}
+
+    if len(a) > len(ATTRIBUTES_FULL):
+        vertices = np.array(a[-1]) 
+    else:
+        vertices = None
+    # print(attributes, len(a), len(ATTRIBUTES_FULL), a[-1], vertices)
+    return create_new_sprite(attributes, vertices=vertices)
+
+def get_condition_df(trial_df):
+    trial_df = trial_df.copy()
+    if 'initial_state' not in trial_df.columns:
+        raise KeyError('initial_state not in dataframe')
+    condition = []
+    initial_state = trial_df.initial_state
+    for i, it in enumerate(initial_state):
+        condition.append([i, np.round(it['prey'][0].x, decimals=1), np.round(it['prey'][0].x_vel, decimals=3), it['occluders'][0].opacity == 255])
+    condition_df = pd.DataFrame(data=condition, columns=['trial_num', 'prey_x', 'prey_vel', 'occluded'])    
+    trial_df = trial_df.merge(condition_df, on='trial_num')
+    return trial_df
+
+def get_initial_state(trial):
+    """Get initial state OrderedDict."""
+    def _attributes_to_sprite_list(sprite_list):
+        return [attributes_to_sprite(s) for s in sprite_list]
+
+    state = collections.OrderedDict([
+        (k, _attributes_to_sprite_list(v))
+        for k, v in trial[0][_SPRITE_LOG_INDEX] if k != 'walls' # TODO: Remove this
+    ])
+    
+    return state
+
+def get_initial_state_df(trial_df):
+    initial_state_df = trial_df.copy()
+    initial_states = []
+    for trial_path in trial_df.trial_path:
+        trial = json.load(open(trial_path, 'r'))
+        initial_state = get_initial_state(trial)
+        initial_states.append(initial_state)
+    initial_state_df['initial_state'] = initial_states
+    return initial_state_df
+
+def get_trial_df(trial_paths):    
+    """Create trial dataframe with features for each trial stimulus.
+    This dataframe has one row per trial.
+    """
+
+    trial_df = pd.DataFrame({
+        'trial_num': range(len(trial_paths)),
+        'trial_path': trial_paths
+    })
+
+    # stim_feature_keys = set()
+    # for stim_f in stimulus_features:
+    #     stim_feature_keys.update(stim_f.keys())
+    # stim_feature_keys = list(stim_feature_keys)
+    
+    # for column_name in stim_feature_keys:
+    #     column = [stim_f.get(column_name, None) for stim_f in stimulus_features]
+    #     trial_df[column_name] = column
+
+    return trial_df
+
+def _get_sprite_pos(sprite_string, step_string):
+    x_ind = ATTRIBUTES_PARTIAL_INDICES['x']
+    y_ind = ATTRIBUTES_PARTIAL_INDICES['y']
+    for x in step_string[-1]:
+        if x[0] == sprite_string:
+            sprite = [[x_attr[x_ind], x_attr[y_ind]] for x_attr in x[1]]
+            return sprite
+
+def _get_prey_pos(step_string):
+    return _get_sprite_pos('prey', step_string)
+def _get_agent_pos(step_string):
+    return _get_sprite_pos('agent', step_string)
+def _get_occluders_pos(step_string):
+    return _get_sprite_pos('occluders', step_string) 
+
+def get_prey_pos(trial, sample_every=1):
+    step_indices = np.arange(0, len(trial) - 2, sample_every)
+    prey_pos = []
+    for step in step_indices:
+        step_string = trial[step + 2]
+        prey_pos.append(_get_prey_pos(step_string))
+    prey_pos = [np.array(x) for x in prey_pos if len(x) > 0 ]
+    return prey_pos
+
+def get_agent_pos(trial, sample_every=1):
+    step_indices = np.arange(0, len(trial) - 2, sample_every)
+    agent_pos = []
+    for step in step_indices:
+        step_string = trial[step + 2]
+        agent_pos.append(_get_agent_pos(step_string))
+    agent_pos = [np.array(x) for x in agent_pos if len(x) > 0 ]
+    return agent_pos
+
+def _get_prey_visible(trial):
+    prey_pos = trial.prey_pos
+    prey_pos = [pp[0][0] for pp in prey_pos] # TODO: Adjust for multiple prey
+    occluders_pos = trial.occluders_pos
+    occluders_pos = [op[:, 0] for op in occluders_pos]
+    occluders_pos = [(2 * op) + [1.1, -2.1] for op in occluders_pos]
+    visible = [op[0] <= pp <= op[1] for (pp, op) in zip(prey_pos, occluders_pos)]
+    return visible
+    
+def get_prey_visible(trial_df):
+    if 'prey_pos' not in trial_df.columns or 'occluders_pos' not in trial_df.columns:
+        raise KeyError('prey_pos or occluders_pos not in dataframe')
+    trial_df = trial_df.copy()
+    prey_visible = []
+    for _, trial in trial_df.iterrows():
+        prey_visible.append(_get_prey_visible(trial))
+    trial_df['prey_visible'] = prey_visible
+    return trial_df
+
+def get_occluders_pos(trial, sample_every=1):
+    step_indices = np.arange(0, len(trial) - 2, sample_every)
+    occluders_pos = []
+    for step in step_indices:
+        step_string = trial[step + 2]
+        occluders_pos.append(_get_occluders_pos(step_string))
+    occluders_pos = [np.array(x) for x in occluders_pos if len(x) > 0 ]
+    return occluders_pos
+
+def get_occluders_pos_df(trial_df):
+    occluders_pos_df = trial_df.copy()
+    occluders_poss = []
+    for trial_path in trial_df.trial_path:
+        trial = json.load(open(trial_path, 'r'))
+        occluders_pos = get_occluders_pos(trial)
+        occluders_poss.append(occluders_pos)
+    occluders_pos_df['occluders_pos'] = occluders_poss
+    return occluders_pos_df
+
+def get_prey_pos_df(trial_df):
+    prey_pos_df = trial_df.copy()
+    prey_poss = []
+    for trial_path in trial_df.trial_path:
+        trial = json.load(open(trial_path, 'r'))
+        prey_pos = get_prey_pos(trial)
+        prey_poss.append(prey_pos)
+    prey_pos_df['prey_pos'] = prey_poss
+    return prey_pos_df
+
+def get_agent_pos_df(trial_df):
+    agent_pos_df = trial_df.copy()
+    agent_poss = []
+    for trial_path in trial_df.trial_path:
+        trial = json.load(open(trial_path, 'r'))
+        agent_pos = get_agent_pos(trial)
+        agent_poss.append(agent_pos)
+    agent_pos_df['agent_pos'] = agent_poss
+    return agent_pos_df
+
+
+def _get_error(trial):
+    ap = trial.agent_pos[-1][0][0]
+    pp = [p[0] for p in trial.prey_pos[-1]]
+    return ap - pp
+
+def get_error_df(pos_df):
+    _check_cols(('prey_pos', 'agent_pos'), pos_df)
+    pos_df['error'] = pos_df.apply(_get_error, axis=1)
+    pos_df = pos_df.copy()
+    return pos_df
+
+def _get_prey_visible_step(trial):
+    vis = np.where(trial.prey_visible)[0]
+    if len(vis) == 0:
+        return None
+    return vis[0]
+
+def get_prey_visible_step_df(prey_visible_df):
+    _check_cols(('prey_visible', ), prey_visible_df)
+    prey_visible_df = prey_visible_df.copy()
+    prey_visible_df['prey_visible_step'] = prey_visible_df.apply(_get_prey_visible_step, axis=1)
+    return prey_visible_df
+
+
+def _get_trajectory(group):
+    
+    agent_pos = np.hstack(group['agent_pos'])
+    if agent_pos.shape[1] > 1:
+        agent_pos = list(np.mean(agent_pos, axis=1)[:, 0])
+    else:
+        agent_pos = list(agent_pos.squeeze()[:, 0])
+    return agent_pos
+
+def get_trajectory_df(pos_df):
+    _check_cols(('prey_vel', 'prey_x', 'occluded', 'agent_pos', 'prey_pos', 'prey_visible_step'), pos_df)
+    pos_df = pos_df.copy()
+    c_df = pos_df.groupby(['prey_vel', 'prey_x', 'occluded']).apply(lambda x: _get_trajectory(x))
+    return c_df
+
+## PLOTTING FUNCTIONS
+def display_condition_error(error_df):
+    _check_cols(('error', 'prey_vel', 'prey_x', 'trial_num', 'occluded'), error_df)
+    ce_df = error_df.groupby(['prey_vel', 'prey_x', 'occluded'])['error'].apply(lambda e: np.mean(e)[0]).reset_index(level=-1).pivot(columns='occluded')
+    ce_df = ce_df.rename(columns={False: "occluded", True: "visible"}, level=1)['error']
+    f, ax = plt.subplots(1,1, dpi=100)
+    sns.scatterplot(data=ce_df, x='visible', y='occluded', ax=ax)
+    ax.axline((-.2,-.2), (0.1, 0.1))
+
+
+def display_condition_distr(condition_df):
+    if 'prey_vel' not in condition_df.columns or 'prey_x' not in condition_df.columns or 'occluded' not in condition_df.columns:
+        raise KeyError('prey_vel, prey_x, or occluded not in dataframe')
+    f, axs = plt.subplots(1, 2)
+    sns.histplot(data=condition_df, x='prey_vel', hue='occluded', ax=axs[0])
+    sns.histplot(data=condition_df, x='prey_x', hue='occluded', ax=axs[1])
+    plt.show()
+    condition_df = condition_df.copy()
+    condition_df.occluded = np.int8(condition_df.occluded)
+    sns.pairplot(condition_df[['prey_x', 'prey_vel', 'occluded']], kind='hist', plot_kws={'cbar': True})
+    
+def display_prey_agent_pos(pos_df, show_visible=True, sample_every=2):
+    if 'prey_pos' not in pos_df.columns or 'occluders_pos' not in pos_df.columns or 'agent_pos' not in pos_df.columns:
+        raise KeyError('prey_pos, agent_pos, or occluders_pos not in dataframe')
+    if show_visible and 'prey_visible' not in pos_df.columns:
+        raise KeyError('prey_visible not in dataframe')
+    for _, trial in pos_df.iterrows():
+        pp = trial.prey_pos[::sample_every]
+        ap = trial.agent_pos[::sample_every]
+        if show_visible:
+            pv = np.clip(trial.prey_visible[::sample_every], 0.1, 1)
+        else:
+            pv = np.ones(len(pp))
+        n_prey = len(pp[0]) # number of prey
+        f, ax = plt.subplots(1, 1, dpi=100)        
+        color = np.linspace(1., 0.666, len(ap))
+        color = np.stack([colorsys.hsv_to_rgb(c, 1, 1) for c in color], axis=0)
+        for i, (pos, prey_vis) in enumerate(zip(pp, pv)):            
+            for p in range(n_prey):
+                ax.scatter(pos[p][0], pos[p][1], color=color[i],  marker='.', alpha=prey_vis, s=15)
+        for i, pos in enumerate(ap):
+            ax.scatter(pos[0][0], pos[0][1], color=color[i],  marker='.', alpha=prey_vis)
+        ax.set_xlim([-0.1, 1.1])
+        ax.set_ylim([.05, 1.01])
+            
+

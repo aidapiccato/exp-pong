@@ -43,15 +43,16 @@ def get_config(_):
     left_wall = [[0.05, -0.2], [0.05, 2], [-1, 2], [-1, -0.2]]
     right_wall = [[0.95, -0.2], [0.95, 2], [2, 2], [2, -0.2]]
 
-    walls = [
-        sprite.Sprite(shape=np.array(v), x=0, y=0, c0=0., c1=0., c2=0.5)
-        for v in [left_wall, right_wall]
-    ]
 
     def state_initializer():
+        walls = [
+            sprite.Sprite(shape=np.array(v), x=0, y=0, c0=0., c1=0., c2=0.5)
+            for v in [left_wall, right_wall]
+        ]
         agent = sprite.Sprite(
             x=0.5, y=0.1, shape='square', aspect_ratio=0.2, scale=0.1, c0=0.33,
             c1=1., c2=0.66)
+
         # Occluders
 
         occluder_rad = 0.35
