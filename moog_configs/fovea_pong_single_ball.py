@@ -22,7 +22,7 @@ from moog import physics as physics_lib
 from moog import sprite
 from moog import tasks
 from moog.state_initialization import distributions as distribs
-
+from moog import shapes
 
 def _get_config(x_vel_candidates, x_candidates):
     """Get environment config."""
@@ -53,29 +53,19 @@ def _get_config(x_vel_candidates, x_candidates):
             x=0.5, y=0.1, shape='square', aspect_ratio=0.2, scale=0.1, c0=0.33,
             c1=1., c2=0.66)
 
-        # Occluders
+        # Annulus
 
-        occluder_rad = 0.35
-    
-        occluder_shape_left = np.array([
-            [-1.1, -0.1], [occluder_rad, -0.1], [occluder_rad, 1.1], [-1.1, 1.1]
-        ])
-        occluder_shape_right = np.array([
-            [1 - occluder_rad, -0.1], [2.1, -0.1], [2.1, 1.1], [1 - occluder_rad, 1.1]
-        ])
+        annulus_shape = shapes.annulus_vertices(0.15, 2.)
 
         opacity = np.random.choice([120, 255], p=[0.3, 0.7])
- 
-        occluders = [sprite.Sprite(
-            x=0., y=0., shape=occluder_shape_left, scale=1., c0=0., c1=0., c2=0.5, opacity=opacity), 
-                sprite.Sprite(
-            x=0., y=0., shape=occluder_shape_right, scale=1., c0=0., c1=0., c2=0.5, opacity=opacity), 
-        ]
-        
+
+        agent_annulus = sprite.Sprite(
+            x=0.5, y=0.5, shape=annulus_shape, scale=1., c0=0.6, c1=1., c2=1., opacity=opacity)
+
         state = collections.OrderedDict([            
             ('prey', [sprite.Sprite(**prey_factors.sample())]),
+            ('occluders', [agent_annulus]),
             ('agent', [agent]),
-            ('occluders', occluders),
             ('walls', walls),
         ])
         return state
@@ -108,14 +98,21 @@ def _get_config(x_vel_candidates, x_candidates):
     # Action space
     ############################################################################
 
-    # action_space = action_spaces.Joystick(
-    #     scaling_factor=0.005, action_layers=['agent', 'occluders'], constrained_lr=True)
-    action_space = action_spaces.Grid(
+    agent_action_space = action_spaces.Grid(
         scaling_factor=0.015,
-        action_layers=['agent', 'occluders'],
+        action_layers=['agent'],
         control_velocity=True,
         momentum=0.5,  
     )
+
+    occluder_action_space = action_spaces.Grid(
+        action_layers=['occluders'], 
+        scaling_factor=0.017,
+        control_velocity=True,
+        momentum=0.7,
+    )
+
+    action_space = action_spaces.Composite(agent=agent_action_space, occluders=occluder_action_space)
 
     ############################################################################
     # Observer

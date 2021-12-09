@@ -24,7 +24,7 @@ from moog import tasks
 from moog.state_initialization import distributions as distribs
 
 
-def _get_config(x_vel_candidates, x_candidates):
+def _get_config(occluder_shift_candidates, x_vel_candidates):
     """Get environment config."""
 
     ############################################################################
@@ -34,10 +34,11 @@ def _get_config(x_vel_candidates, x_candidates):
 
     # Prey 
     prey_factors = distribs.Product(
-        [distribs.Discrete('x', candidates=x_candidates),
+        [distribs.Discrete('x', candidates=np.linspace(0.1, 0.8, 8)),
          distribs.Discrete('x_vel', candidates=x_vel_candidates)],
-        y=1.2, y_vel=-0.02, shape='circle', scale=0.07, c0=0.2, c1=1., c2=1.,
+        y=1.5, y_vel=-0.02, shape='circle', scale=0.07, c0=0.2, c1=1., c2=1.,
     )
+
 
     # Walls
     left_wall = [[0.05, -0.2], [0.05, 2], [-1, 2], [-1, -0.2]]
@@ -54,16 +55,17 @@ def _get_config(x_vel_candidates, x_candidates):
             c1=1., c2=0.66)
 
         # Occluders
-
-        occluder_rad = 0.35
-    
+        
+        # DECENTERED OCCLUDER
+        occluder_diam = 0.3
+        occluder_rad = occluder_diam / 2
+        occluder_center = np.random.choice(occluder_shift_candidates)
         occluder_shape_left = np.array([
-            [-1.1, -0.1], [occluder_rad, -0.1], [occluder_rad, 1.1], [-1.1, 1.1]
+            [-1.1, -0.1], [occluder_center - occluder_rad, -0.1], [occluder_center - occluder_rad, 1.1], [-1.1, 1.1]
         ])
         occluder_shape_right = np.array([
-            [1 - occluder_rad, -0.1], [2.1, -0.1], [2.1, 1.1], [1 - occluder_rad, 1.1]
+            [occluder_center + occluder_rad, -0.1], [2.1, -0.1], [2.1, 1.1], [occluder_center +  occluder_rad, 1.1]
         ])
-
         opacity = np.random.choice([120, 255], p=[0.3, 0.7])
  
         occluders = [sprite.Sprite(
@@ -71,11 +73,49 @@ def _get_config(x_vel_candidates, x_candidates):
                 sprite.Sprite(
             x=0., y=0., shape=occluder_shape_right, scale=1., c0=0., c1=0., c2=0.5, opacity=opacity), 
         ]
+
+        window_offset = 0.1
+
+        window_shape = np.array([
+            [occluder_center - occluder_rad + window_offset, -0.1], [occluder_center + occluder_rad - window_offset, -0.1],
+            [occluder_center + occluder_rad - window_offset, 1.1], [occluder_center - occluder_rad + window_offset, 1.1]])
+
+        window = sprite.Sprite(x=0., y=0., shape=window_shape, c0=0.2, c1=1., c2=1., scale=1., opacity=0)
+
+        # SHIFTED OCCLUDER        
+        # occluder_rad = 0.35
+
+        # occluder_shift = np.random.choice(occluder_shift_candidates)
         
+        # occluder_shape_left = np.array([
+        #     [-1.1, -0.1], [occluder_rad - occluder_shift, -0.1], [occluder_rad - occluder_shift, 1.1], [-1.1, 1.1]
+        # ])
+        # occluder_shape_right = np.array([
+        #     [1 - occluder_rad - occluder_shift, -0.1], [2.1, -0.1], [2.1, 1.1], [1 - occluder_rad - occluder_shift, 1.1]
+        # ])
+
+        # opacity = np.random.choice([120, 255], p=[0.3, 0.7])
+ 
+        # occluders = [sprite.Sprite(
+        #     x=0., y=0., shape=occluder_shape_left, scale=1., c0=0., c1=0., c2=0.5, opacity=opacity), 
+        #         sprite.Sprite(
+        #     x=0., y=0., shape=occluder_shape_right, scale=1., c0=0., c1=0., c2=0.5, opacity=opacity), 
+        # ]
+
+        # window_offset = 0.1
+
+        # window_shape = np.array([
+        #     [occluder_rad - occluder_shift + window_offset, -0.1], [1 - occluder_rad - occluder_shift - window_offset, -0.1],
+        #     [1 - occluder_rad - occluder_shift - window_offset, 1.1], [occluder_rad - occluder_shift + window_offset, 1.1]])
+
+        # window = sprite.Sprite(x=0., y=0., shape=window_shape, c0=0.2, c1=1., c2=1., scale=1., opacity=0)
+
+
         state = collections.OrderedDict([            
             ('prey', [sprite.Sprite(**prey_factors.sample())]),
-            ('agent', [agent]),
             ('occluders', occluders),
+            ('window', [window]),
+            ('agent', [agent]),
             ('walls', walls),
         ])
         return state
@@ -87,8 +127,9 @@ def _get_config(x_vel_candidates, x_candidates):
     agent_friction_force = physics_lib.Drag(coeff_friction=0.25)
     asymmetric_collision = physics_lib.Collision(
         elasticity=1., symmetric=False, update_angle_vel=False)
+
     physics = physics_lib.Physics(
-        (agent_friction_force, ['agent', 'occluders']),
+        (agent_friction_force, ['agent', 'occluders', 'window']),
         (asymmetric_collision, 'prey', 'walls'),
         updates_per_env_step=10,
     )
@@ -108,11 +149,20 @@ def _get_config(x_vel_candidates, x_candidates):
     # Action space
     ############################################################################
 
-    # action_space = action_spaces.Joystick(
-    #     scaling_factor=0.005, action_layers=['agent', 'occluders'], constrained_lr=True)
+    # trying to make composite action spaces; not working
+    # action_space_agent = action_spaces.Joystick(
+    #     scaling_factor=0.005, action_layers='agent', constrained_lr=True)
+
+    # action_space_occluder = action_spaces.Joystick(
+    #     scaling_factor=0.005, action_layers='occluders', constrained_lr=True)
+
+    # action_space_window = action_spaces.Joystick(
+    #     scaling_factor=0.005, action_layers='window', constrained_lr=True)
+    # action_space = action_spaces.Composite(agent=action_space_agent,  window=action_space_window) #occluder=action_space_occluder)
+    
     action_space = action_spaces.Grid(
         scaling_factor=0.015,
-        action_layers=['agent', 'occluders'],
+        action_layers=['agent', 'window', 'occluders'],
         control_velocity=True,
         momentum=0.5,  
     )
@@ -132,8 +182,27 @@ def _get_config(x_vel_candidates, x_candidates):
         vanishing_layer='prey',
         contacting_layer='agent',
     )
-    rules = (prey_vanish,)
 
+    def prey_contacting_window(state):
+        if len(state['prey']) > 0:
+            return state['window'][0].overlaps_sprite(state['prey'][0]) and state['occluders'][0].opacity > 0
+        return False
+
+    def _hide_occluders(sprite):
+        sprite.opacity = 0
+
+    hide_occluders = game_rules.ModifySprites(
+        layers='occluders', modifier=_hide_occluders, sample_one=False,)
+
+    hide_occluders = game_rules.ConditionalRule(
+        condition=lambda s: prey_contacting_window(s),
+        rules=hide_occluders,
+    )
+    # WITH HIDE OCCLUDERS RULES
+    # rules = (prey_vanish, hide_occluders)
+
+    # WITHOUT HIDE OCCLUDERS RULES
+    rules = (prey_vanish, )
     ############################################################################
     # Final config
     ############################################################################
@@ -148,6 +217,7 @@ def _get_config(x_vel_candidates, x_candidates):
     }
     return config
 
+
 def get_config(level):
     """Get config dictionary of kwargs for environment constructor.
     
@@ -157,15 +227,26 @@ def get_config(level):
     """
     if level == 0:
         return _get_config(
-            # nonzero x-velocity
-            x_vel_candidates=[-0.01, -0.005, 0, 0.005, 0.01],
-            x_candidates=np.linspace(0.1, 0.8, 8),
+            occluder_shift_candidates=[0],
+            x_vel_candidates=[0],
         )
     elif level == 1:
-        # zero x-velocity
+        # nonzero x-velocity
         return _get_config(
+            occluder_shift_candidates=[0],
+            x_vel_candidates=[-0.01, -0.005, 0.005, 0.01],
+        )
+    elif level == 2:
+        # shifted occluders
+        return _get_config(
+            occluder_shift_candidates=[0.2, 0.5, 0.8],
             x_vel_candidates=[0],
-            x_candidates=np.linspace(0.1, 0.8, 8),
+        )
+    elif level == 3:
+        # shifted occluders and nonzero x-velocity
+        return _get_config(
+            occluder_shift_candidates=[-0.3, -0.1, 0, 0.1, 0.3],
+            x_vel_candidates=[-0.01, -0.005, 0.005, 0.01],
         )
     else:
         raise ValueError('Invalid level {}'.format(level))

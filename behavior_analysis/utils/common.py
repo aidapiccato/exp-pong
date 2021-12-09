@@ -9,6 +9,7 @@ import json
 import numpy as np
 import seaborn as sns
 import colorsys
+from utils.log import log_shape, log_dtypes
 
 _SPRITE_LOG_INDEX = 5
 _PREY_HUES = [0.1666, 0.3333, 0.6667, 0.1667, 0.5, 0.8333]
@@ -82,8 +83,6 @@ def attributes_to_sprite(a):
 
 def get_condition_df(trial_df):
     trial_df = trial_df.copy()
-    if 'initial_state' not in trial_df.columns:
-        raise KeyError('initial_state not in dataframe')
     condition = []
     initial_state = trial_df.initial_state
     for i, it in enumerate(initial_state):
@@ -113,6 +112,7 @@ def get_initial_state_df(trial_df):
         initial_states.append(initial_state)
     initial_state_df['initial_state'] = initial_states
     return initial_state_df
+
 
 def get_trial_df(trial_paths):    
     """Create trial dataframe with features for each trial stimulus.
@@ -156,7 +156,7 @@ def get_prey_pos(trial, sample_every=1):
     for step in step_indices:
         step_string = trial[step + 2]
         prey_pos.append(_get_prey_pos(step_string))
-    prey_pos = [np.array(x) for x in prey_pos if len(x) > 0 ]
+    prey_pos = np.vstack([np.array(x) for x in prey_pos if len(x) > 0 ])
     return prey_pos
 
 def get_agent_pos(trial, sample_every=1):
@@ -165,27 +165,8 @@ def get_agent_pos(trial, sample_every=1):
     for step in step_indices:
         step_string = trial[step + 2]
         agent_pos.append(_get_agent_pos(step_string))
-    agent_pos = [np.array(x) for x in agent_pos if len(x) > 0 ]
+    agent_pos = np.vstack([np.array(x) for x in agent_pos if len(x) > 0 ])
     return agent_pos
-
-def _get_prey_visible(trial):
-    prey_pos = trial.prey_pos
-    prey_pos = [pp[0][0] for pp in prey_pos] # TODO: Adjust for multiple prey
-    occluders_pos = trial.occluders_pos
-    occluders_pos = [op[:, 0] for op in occluders_pos]
-    occluders_pos = [(2 * op) + [1.1, -2.1] for op in occluders_pos]
-    visible = [op[0] <= pp <= op[1] for (pp, op) in zip(prey_pos, occluders_pos)]
-    return visible
-    
-def get_prey_visible(trial_df):
-    if 'prey_pos' not in trial_df.columns or 'occluders_pos' not in trial_df.columns:
-        raise KeyError('prey_pos or occluders_pos not in dataframe')
-    trial_df = trial_df.copy()
-    prey_visible = []
-    for _, trial in trial_df.iterrows():
-        prey_visible.append(_get_prey_visible(trial))
-    trial_df['prey_visible'] = prey_visible
-    return trial_df
 
 def get_occluders_pos(trial, sample_every=1):
     step_indices = np.arange(0, len(trial) - 2, sample_every)
@@ -193,9 +174,34 @@ def get_occluders_pos(trial, sample_every=1):
     for step in step_indices:
         step_string = trial[step + 2]
         occluders_pos.append(_get_occluders_pos(step_string))
-    occluders_pos = [np.array(x) for x in occluders_pos if len(x) > 0 ]
+    occluders_pos = np.vstack([np.hstack(np.array(x)) for x in occluders_pos if len(x) > 0 ])
     return occluders_pos
 
+def get_success(trial_df):
+    prey_pos = trial_df.prey_pos
+    agent_pos = trial_df.agent_pos
+    return np.vstack([int(np.abs((ap[-1, 0] - pp[-1, 0])) < 0.05) for (pp, ap) in zip(prey_pos, agent_pos)])
+
+def get_agent_vel(trial_df):
+    agent_pos = trial_df.agent_pos
+    return [np.diff(ap[:, 0]) for ap in agent_pos]
+
+def get_trial_end_step(trial_df):
+    prey_pos = trial_df.prey_pos
+    return np.vstack([np.where(pp[:, 1]  < 0.1 + 0.04)[0][0] for pp in prey_pos])
+
+def get_prey_visible(trial_df):
+    prey_pos = trial_df.prey_pos
+    prey_pos = [pp[:, 0] for pp in prey_pos]
+    occluders_pos = trial_df.occluders_pos
+    occluders_pos = [op.reshape(-1, 2, 2) for op in occluders_pos]
+    occluders_pos = [op[:, :, 0] for op in occluders_pos]
+    occluders_pos = [(2 * op) + [1.1, -2.1] for op in occluders_pos]
+    visible = [np.all((op[:, 0] <= pp, pp <= op[:, 1]), axis=0) for (pp, op) in zip(prey_pos, occluders_pos)]
+    return visible
+
+@log_shape
+@log_dtypes
 def get_occluders_pos_df(trial_df):
     occluders_pos_df = trial_df.copy()
     occluders_poss = []
@@ -206,6 +212,8 @@ def get_occluders_pos_df(trial_df):
     occluders_pos_df['occluders_pos'] = occluders_poss
     return occluders_pos_df
 
+@log_shape
+@log_dtypes
 def get_prey_pos_df(trial_df):
     prey_pos_df = trial_df.copy()
     prey_poss = []
@@ -216,6 +224,8 @@ def get_prey_pos_df(trial_df):
     prey_pos_df['prey_pos'] = prey_poss
     return prey_pos_df
 
+@log_shape
+@log_dtypes
 def get_agent_pos_df(trial_df):
     agent_pos_df = trial_df.copy()
     agent_poss = []
@@ -226,44 +236,38 @@ def get_agent_pos_df(trial_df):
     agent_pos_df['agent_pos'] = agent_poss
     return agent_pos_df
 
+def trim_pos(trial_df, pos_col):
+    trial_df = trial_df.copy()
+    trial_end_step = trial_df.trial_end_step.to_numpy()
+    pos = trial_df[pos_col].to_numpy()
+    pos = [ap[:tes, :] for (tes, ap) in zip(trial_end_step, pos)]
+    trial_df[pos_col] = pos
+    return trial_df
 
-def _get_error(trial):
-    ap = trial.agent_pos[-1][0][0]
-    pp = [p[0] for p in trial.prey_pos[-1]]
-    return ap - pp
+def get_error(trial_df):
+    agent_pos = trial_df.agent_pos.to_numpy()    
+    agent_pos = [ap[-1, 0] for ap in agent_pos]
+    prey_pos = trial_df.prey_pos.to_numpy()
+    prey_pos = [pp[-1, 0] for pp in prey_pos]
+    return [np.abs((ap - pp)) for (pp, ap) in zip(prey_pos, agent_pos)]
 
-def get_error_df(pos_df):
-    _check_cols(('prey_pos', 'agent_pos'), pos_df)
-    pos_df['error'] = pos_df.apply(_get_error, axis=1)
-    pos_df = pos_df.copy()
-    return pos_df
-
-def _get_prey_visible_step(trial):
-    vis = np.where(trial.prey_visible)[0]
-    if len(vis) == 0:
-        return None
-    return vis[0]
-
-def get_prey_visible_step_df(prey_visible_df):
-    _check_cols(('prey_visible', ), prey_visible_df)
-    prey_visible_df = prey_visible_df.copy()
-    prey_visible_df['prey_visible_step'] = prey_visible_df.apply(_get_prey_visible_step, axis=1)
-    return prey_visible_df
+def get_prey_visible_step(trial_df):
+    prey_visible = trial_df.prey_visible
+    prey_visible_step = [np.where(pv)[0] for pv in prey_visible]
+    prey_visible_step = [pvs[0] if len(pvs) > 0 else -1 for pvs in prey_visible_step]
+    return prey_visible_step
 
 
-def _get_trajectory(group):
-    
-    agent_pos = np.hstack(group['agent_pos'])
-    if agent_pos.shape[1] > 1:
-        agent_pos = list(np.mean(agent_pos, axis=1)[:, 0])
-    else:
-        agent_pos = list(agent_pos.squeeze()[:, 0])
-    return agent_pos
+def _get_trajectories(group):    
+    agent_pos = group['agent_pos']    
+    trial_length = int(np.min([len(l) for l in agent_pos]))
+    stack_agent_pos = np.hstack([ap[-trial_length:] for ap in agent_pos])
+    return stack_agent_pos[:, :, 0]
 
-def get_trajectory_df(pos_df):
+def get_trajectories_df(pos_df):
     _check_cols(('prey_vel', 'prey_x', 'occluded', 'agent_pos', 'prey_pos', 'prey_visible_step'), pos_df)
     pos_df = pos_df.copy()
-    c_df = pos_df.groupby(['prey_vel', 'prey_x', 'occluded']).apply(lambda x: _get_trajectory(x))
+    c_df = pos_df.groupby(['prey_vel', 'prey_x', 'occluded']).apply(lambda x: pd.Series({'agent_pos': _get_trajectories(x)}))
     return c_df
 
 ## PLOTTING FUNCTIONS
