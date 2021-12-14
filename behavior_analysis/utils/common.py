@@ -91,6 +91,32 @@ def get_condition_df(trial_df):
     trial_df = trial_df.merge(condition_df, on='trial_num')
     return trial_df
 
+def get_states(trial, sprites_list):
+    def _attributes_to_sprite_list(sprite_list):
+        return [np.array(s)[np.asarray((0, 1, -1))] for s in sprite_list]
+
+    states = [collections.OrderedDict([
+        (k, _attributes_to_sprite_list(v))
+        for k, v in trial[i+2][_SPRITE_LOG_INDEX] if k in sprites_list # TODO: Remove this
+    ]) for i in range(len(trial)-2)]
+    
+    return states
+
+def get_prey_pos_from_states(trial_df):
+    prey_pos = []
+    for state in trial_df.states:
+        prey_pos_dict = {}
+        for step in state:
+            prey_state = step['prey']
+            for p in prey_state: # for each prey
+                if p[-1] not in prey_pos_dict:
+                    prey_pos_dict[p[-1]] = []
+                prey_pos_dict[p[-1]].append(p[:2])
+        prey_pos.append(list(prey_pos_dict.values()))
+    return prey_pos
+
+            
+
 def get_initial_state(trial):
     """Get initial state OrderedDict."""
     def _attributes_to_sprite_list(sprite_list):
@@ -102,6 +128,16 @@ def get_initial_state(trial):
     ])
     
     return state
+
+def get_states_df(trial_df, sprites_list=['agent', 'prey']):
+    states_df = trial_df.copy()
+    states = []
+    for trial_path in trial_df.trial_path:
+        trial = json.load(open(trial_path, 'r'))
+        trial_states = get_states(trial, sprites_list)
+        states.append(trial_states)
+    states_df['states'] = states
+    return states_df
 
 def get_initial_state_df(trial_df):
     initial_state_df = trial_df.copy()
@@ -138,15 +174,19 @@ def get_trial_df(trial_paths):
 def _get_sprite_pos(sprite_string, step_string):
     x_ind = ATTRIBUTES_PARTIAL_INDICES['x']
     y_ind = ATTRIBUTES_PARTIAL_INDICES['y']
+
     for x in step_string[-1]:
         if x[0] == sprite_string:
             sprite = [[x_attr[x_ind], x_attr[y_ind]] for x_attr in x[1]]
             return sprite
 
+
 def _get_prey_pos(step_string):
     return _get_sprite_pos('prey', step_string)
+
 def _get_agent_pos(step_string):
     return _get_sprite_pos('agent', step_string)
+
 def _get_occluders_pos(step_string):
     return _get_sprite_pos('occluders', step_string) 
 
@@ -154,9 +194,10 @@ def get_prey_pos(trial, sample_every=1):
     step_indices = np.arange(0, len(trial) - 2, sample_every)
     prey_pos = []
     for step in step_indices:
-        step_string = trial[step + 2]
+        step_string = trial[step + 2]    
         prey_pos.append(_get_prey_pos(step_string))
-    prey_pos = np.vstack([np.array(x) for x in prey_pos if len(x) > 0 ])
+
+    prey_pos = [np.array(x) for x in prey_pos if len(x) > 0 ]
     return prey_pos
 
 def get_agent_pos(trial, sample_every=1):
@@ -188,16 +229,17 @@ def get_agent_vel(trial_df):
 
 def get_trial_end_step(trial_df):
     prey_pos = trial_df.prey_pos
+    prey_pos = [np.vstack(pp) for pp in prey_pos]
     return np.vstack([np.where(pp[:, 1]  < 0.1 + 0.04)[0][0] for pp in prey_pos])
 
 def get_prey_visible(trial_df):
     prey_pos = trial_df.prey_pos
-    prey_pos = [pp[:, 0] for pp in prey_pos]
+    prey_pos = [pp[:, :] for pp in prey_pos]
     occluders_pos = trial_df.occluders_pos
     occluders_pos = [op.reshape(-1, 2, 2) for op in occluders_pos]
     occluders_pos = [op[:, :, 0] for op in occluders_pos]
     occluders_pos = [(2 * op) + [1.1, -2.1] for op in occluders_pos]
-    visible = [np.all((op[:, 0] <= pp, pp <= op[:, 1]), axis=0) for (pp, op) in zip(prey_pos, occluders_pos)]
+    visible = [np.all((op[:, 0] <= pp[:, 0], pp[:, 0] <= op[:, 1], pp[:, 1] <= 1.0), axis=0) for (pp, op) in zip(prey_pos, occluders_pos)]
     return visible
 
 @log_shape
@@ -240,7 +282,8 @@ def trim_pos(trial_df, pos_col):
     trial_df = trial_df.copy()
     trial_end_step = trial_df.trial_end_step.to_numpy()
     pos = trial_df[pos_col].to_numpy()
-    pos = [ap[:tes, :] for (tes, ap) in zip(trial_end_step, pos)]
+    pos = [np.vstack(pp) for pp in pos]
+    pos = [pp[:tes, :] for (tes, pp) in zip(trial_end_step, pos)]
     trial_df[pos_col] = pos
     return trial_df
 

@@ -17,7 +17,7 @@ main.mwel.
 _PWD = '/Users/aidapiccato/exp-pong/mworks'
 
 _PYTHON_SITE_PACKAGES = (
-    '/Users/aidapiccato/py3_mworks/lib/python3.8/'
+    '/Users/aidapiccato/opt/miniconda3/envs/py3_mworks/lib/python3.9/'
     'site-packages'
 )
 
@@ -26,7 +26,7 @@ import sys
 if '' not in sys.path:
     sys.path.insert(0, '')
 if _PYTHON_SITE_PACKAGES not in sys.path:
-    sys.path.append(_PYTHON_SITE_PACKAGES)
+    sys.path.insert(1, _PYTHON_SITE_PACKAGES)
 if _PWD not in sys.path:
     sys.path.append(_PWD)
 

@@ -52,7 +52,7 @@ flags.DEFINE_boolean('write_gif', False, 'Whether to write a gif.')
 flags.DEFINE_string('gif_file',
                     '/logs/gifs/test.gif',
                     'File path to write the gif to.')
-flags.DEFINE_integer('gif_fps', 15, 'Frames per second for the gif.')
+flags.DEFINE_integer('gif_fps', 10, 'Frames per second for the gif.')
 
 # Flags for logging timestep data
 flags.DEFINE_boolean('log_data', False, 'Whether to log timestep data.')

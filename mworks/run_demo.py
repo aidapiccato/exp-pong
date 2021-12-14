@@ -32,10 +32,10 @@ flags.DEFINE_string('config',
                     'configs.pong',
                     'Filename of task config to use.')
 flags.DEFINE_integer('level', 0, 'Level of task config to run.')
-flags.DEFINE_integer('render_size', 256,
+flags.DEFINE_integer('render_size', 512,
                      'Height and width of the output image.')
 flags.DEFINE_integer('anti_aliasing', 1, 'Renderer anti-aliasing factor.')
-flags.DEFINE_integer('fps', 500, 'Frames per second.')
+flags.DEFINE_integer('fps', 30, 'Frames per second.')
 flags.DEFINE_integer('reward_history', 30,
                      'Number of historical reward timesteps to plot.')
 flags.DEFINE_boolean('fixation_phase', False,
