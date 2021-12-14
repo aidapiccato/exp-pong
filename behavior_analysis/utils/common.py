@@ -196,7 +196,6 @@ def get_prey_pos(trial, sample_every=1):
     for step in step_indices:
         step_string = trial[step + 2]    
         prey_pos.append(_get_prey_pos(step_string))
-
     prey_pos = [np.array(x) for x in prey_pos if len(x) > 0 ]
     return prey_pos
 
@@ -216,6 +215,7 @@ def get_occluders_pos(trial, sample_every=1):
         step_string = trial[step + 2]
         occluders_pos.append(_get_occluders_pos(step_string))
     occluders_pos = np.vstack([np.hstack(np.array(x)) for x in occluders_pos if len(x) > 0 ])
+    occluders_pos = occluders_pos.reshape(-1, 2, 2)[:, :, 0] + [(1.1 + 0.35)/2, -1 * (1.1 + 0.35)/2]
     return occluders_pos
 
 def get_success(trial_df):

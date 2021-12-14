@@ -60,9 +60,6 @@ def get_success(trial_df):
 def get_prey_visible(trial_df):
     prey_pos = trial_df.prey_pos.to_numpy()
     occluders_pos = trial_df.occluders_pos
-    occluders_pos = [op.reshape(-1, 2, 2) for op in occluders_pos]
-    occluders_pos = [op[:, :, 0] for op in occluders_pos]
-    occluders_pos = [(2 * op) + [1.1, -2.1] for op in occluders_pos]
     visible = []
     for (op, pp) in zip(occluders_pos, prey_pos):
         trial_visible = []

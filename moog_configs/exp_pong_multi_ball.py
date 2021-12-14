@@ -24,7 +24,7 @@ from moog import tasks
 from moog.state_initialization import distributions as distribs
 
 
-def _get_config(x_vel_candidates, x_candidates, n_prey ):
+def _get_config(x_vel_candidates, x_candidates, n_prey, y_candidates):
     """Get environment config."""
 
     ############################################################################
@@ -33,11 +33,24 @@ def _get_config(x_vel_candidates, x_candidates, n_prey ):
 
 
     # Prey 
+    # prey_factors = distribs.Product(
+    #     [distribs.Discrete('x', candidates=x_candidates),
+    #      distribs.Discrete('x_vel', candidates=x_vel_candidates),
+    #      distribs.Discrete('y', candidates=y_candidates)
+    #      ], y_vel=-0.015, shape='circle', scale=0.07, c0=0.2, c1=1., c2=1.,        
+    # )
+
     prey_factors = distribs.Product(
         [distribs.Discrete('x', candidates=x_candidates),
          distribs.Discrete('x_vel', candidates=x_vel_candidates),
-         distribs.Continuous('y', minval=1.2, maxval=3.2)], y_vel=-0.015, shape='circle', scale=0.07, c0=0.2, c1=1., c2=1.,        
+         ], y_vel=-0.015, shape='circle', scale=0.07, c0=0.2, c1=1., c2=1.,        
     )
+
+    def _gen_prey_sprite(i):
+        # Generate prey with fixed inter-prey interval
+        p = prey_factors.sample()
+        p['y'] = i * 0.4 + 1.2 # inter-prey interval is 0.4å
+        return sprite.Sprite(**p)
 
     # Walls
     left_wall = [[0.05, -0.2], [0.05, 2], [-1, 2], [-1, -0.2]]
@@ -73,7 +86,8 @@ def _get_config(x_vel_candidates, x_candidates, n_prey ):
         ]
         
         state = collections.OrderedDict([            
-            ('prey', [sprite.Sprite(**prey_factors.sample()) for prey in range(n_prey)]),
+            ('prey', [_gen_prey_sprite(i) for i in range(n_prey)]),
+            # ('prey', [sprite.Sprite(**prey_factors.sample()) for _ in range(n_prey)]),
             ('agent', [agent]),
             ('occluders', occluders),
             ('walls', walls),
@@ -158,12 +172,13 @@ def get_config(level):
     if level == 0:
         return _get_config(
             # nonzero x-velocity, 2 balls
-            x_vel_candidates=[-0.01, -0.005, 0, 0.005, 0.01],
+            x_vel_candidates=[0],
             x_candidates=np.linspace(0.1, 0.8, 8),
+            y_candidates=np.linspace(1, 2, 6),
             n_prey=2
         )
     elif level == 1:
-        # zero x-velocity
+        # zero x-velocitys
         return _get_config(
             x_vel_candidates=[0],
             x_candidates=np.linspace(0.1, 0.8, 8),
